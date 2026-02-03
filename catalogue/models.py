@@ -121,3 +121,76 @@ class CartItem(models.Model):
 
     def __str__(self):
         return f"{self.product.name} - {self.quantity}"
+
+
+class Order(models.Model):
+    """
+    Order model
+
+    Attributes:
+        user (User): The user associated with the order
+        cart (Cart): The cart associated with the order
+        status (CharField): The status of the order
+        created_at (DateTimeField): The date and time the order was created
+        updated_at (DateTimeField): The date and time the order was updated
+    """
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE)
+    status = models.CharField(
+        max_length=255, 
+        choices=[('pending', 'Pending'), ('completed', 'Completed'), ('cancelled', 'Cancelled')], 
+        default='pending')
+    sub_total = models.DecimalField(max_digits=10, decimal_places=2)
+    tax = models.DecimalField(max_digits=10, decimal_places=2)
+    total = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.user.username
+
+
+class OrderItem(models.Model):
+    """
+    Order item model
+
+    Attributes:
+        order (Order): The order associated with the item
+        product (Product): The product associated with the item
+        quantity (IntegerField): The quantity of the product in the order
+        created_at (DateTimeField): The date and time the item was created
+        updated_at (DateTimeField): The date and time the item was updated
+    """
+    order = models.ForeignKey(Order, on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    quantity = models.IntegerField(default=1)
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    line_total = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.product.name} - {self.quantity} - {self.line_total}"
+
+
+class Payment(models.Model):
+    """
+    Payment model
+
+    Attributes:
+        order (Order): The order associated with the payment
+        payment_method (CharField): The payment method used
+        amount (DecimalField): The amount paid
+        created_at (DateTimeField): The date and time the payment was created
+        updated_at (DateTimeField): The date and time the payment was updated
+    """
+    order = models.ForeignKey(Order, on_delete=models.CASCADE)
+    method = models.CharField(max_length=255)
+    status = models.CharField(max_length=255, choices=[('pending', 'Pending'), ('completed', 'Completed'), ('failed', 'Failed')], default='pending')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    transaction_reference = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.order.user.username} - {self.payment_method} - {self.amount}"
