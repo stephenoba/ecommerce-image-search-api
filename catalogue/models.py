@@ -81,10 +81,8 @@ class Cart(models.Model):
         status (CharField): The status of the cart
         created_at (DateTimeField): The date and time the cart was created
         updated_at (DateTimeField): The date and time the cart was updated
-
-    User's can't have more than three carts
     """
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE)
     status = models.CharField(
         max_length=255, 
         choices=[('active', 'Active'), ('frozen', 'Frozen'), ('abandoned', 'Abandoned')], 
@@ -96,8 +94,11 @@ class Cart(models.Model):
         return self.user.username
 
     def save(self, *args, **kwargs):
+        # User's can't have more than three carts, and not more than one active cart
         if self.user.carts.count() >= 3:
             raise ValueError("User can't have more than three carts")
+        if self.user.carts.filter(status='active').count() >= 1:
+            raise ValueError("User can't have more than one active cart")
         super().save(*args, **kwargs)
 
 
