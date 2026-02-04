@@ -48,7 +48,7 @@ services:
 
   celery:
     build: .
-    command: celery -A config worker -l info
+    command: celery -A api worker -l info
     volumes:
       - .:/app
       - media_files:/app/media
@@ -63,7 +63,7 @@ services:
 
   celery-beat:
     build: .
-    command: celery -A config beat -l info
+    command: celery -A api beat -l info
     volumes:
       - .:/app
     environment:

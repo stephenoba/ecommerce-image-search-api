@@ -26,6 +26,8 @@ COPY . /app/
 # Collect static files (optional, for production)
 # RUN python manage.py collectstatic --noinput
 
+
+
 # Expose port
 EXPOSE 8000
 

@@ -1,25 +1,24 @@
 from django.db import models
 
 
-class User(models.Model):
+from django.contrib.auth.models import AbstractUser
+
+class User(AbstractUser):
     """
     User model
 
     Attributes:
         name (CharField): The name of the user
-        email (EmailField): The email of the user
-        password (CharField): The password of the user
         created_at (DateTimeField): The date and time the user was created
         updated_at (DateTimeField): The date and time the user was updated
     """
     name = models.CharField(max_length=255)
-    email = models.EmailField()
-    password = models.CharField(max_length=255)
+    # email and password are provided by AbstractUser
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.name
+        return self.name or self.username
         
 
 class Address(models.Model):
