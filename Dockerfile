@@ -26,7 +26,12 @@ COPY . /app/
 # Collect static files (optional, for production)
 # RUN python manage.py collectstatic --noinput
 
+# media files
+RUN mkdir -p media
+RUN mkdir -p static
 
+# Run the seed command
+RUN python manage.py seed_db
 
 # Expose port
 EXPOSE 8000
