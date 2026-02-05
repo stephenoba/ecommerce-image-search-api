@@ -30,8 +30,8 @@ COPY . /app/
 RUN mkdir -p media
 RUN mkdir -p static
 
-# Run the seed command
-RUN python manage.py seed_db
+# Run the seed command (commented out - requires DB connection at runtime)
+# RUN python manage.py seed_db
 
 # Expose port
 EXPOSE 8000

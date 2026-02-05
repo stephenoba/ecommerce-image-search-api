@@ -6,3 +6,9 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = '__all__'
+
+
+class ProductCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ['name', 'sku', 'description', 'price', 'stock_quantity', 'image', 'category']

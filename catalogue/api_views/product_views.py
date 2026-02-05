@@ -2,7 +2,9 @@ from rest_framework import generics
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from catalogue.models import Product
-from catalogue.serializers.product_serializers import ProductSerializer
+from catalogue.serializers.product_serializers import ProductSerializer, ProductCreateSerializer
+from catalogue.tasks import generate_embedding
+from catalogue.permissions import IsAdminUser
 
 class ProductPagination(PageNumberPagination):
     page_size = 10
@@ -43,7 +45,20 @@ class ProductListAPIView(generics.ListAPIView):
         return queryset
 
 class ProductByCategoryListAPIView(ProductListAPIView):
+    # This is actually unneccessary since we are already filtering by category_slug in the ProductListAPIView
+    # But I will keep it for now
     def get_queryset(self):
         queryset = super().get_queryset()
         slug = self.kwargs['slug']
         return queryset.filter(category__slug=slug)
+
+
+class ProductCreateAPIView(generics.CreateAPIView):
+    queryset = Product.objects.all()
+    serializer_class = ProductCreateSerializer
+    permission_classes = [IsAdminUser]
+
+    def perform_create(self, serializer):
+        product = serializer.save()
+        # Trigger async task to generate embedding
+        generate_embedding.delay(product.id)
