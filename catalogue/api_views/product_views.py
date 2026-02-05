@@ -16,6 +16,11 @@ class ProductListAPIView(generics.ListAPIView):
 
     def get_queryset(self):
         queryset = Product.objects.all()
+
+        #Filtering by category_slug
+        category_slug = self.request.query_params.get('category_slug')
+        if category_slug:
+            queryset = queryset.filter(category__slug=category_slug)
         
         # Filtering by price range
         min_price = self.request.query_params.get('min_price')
@@ -36,3 +41,9 @@ class ProductListAPIView(generics.ListAPIView):
             queryset = queryset.filter(stock_quantity__lte=max_stock)
             
         return queryset
+
+class ProductByCategoryListAPIView(ProductListAPIView):
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        slug = self.kwargs['slug']
+        return queryset.filter(category__slug=slug)

@@ -96,3 +96,30 @@ class ProductAPITest(TestCase):
         response = self.client.get(url, {'min_stock': 15})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 5)
+
+    def test_get_products_by_category(self):
+        # Create another category and product
+        other_category = Category.objects.create(name='Clothing', slug='clothing')
+        Product.objects.create(
+            name='T-Shirt',
+            sku='SKU-CLOTHING-1',
+            description='A nice t-shirt',
+            price=20.0,
+            stock_quantity=10,
+            category=other_category,
+            image='path/to/image.jpg'
+        )
+
+        url = reverse('product-by-category', kwargs={'slug': 'electronics'})
+        response = self.client.get(url)
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Should return only electronics products (15 created in setUp)
+        self.assertEqual(response.data['count'], 15)
+        
+        # Test clothing category
+        url = reverse('product-by-category', kwargs={'slug': 'clothing'})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['name'], 'T-Shirt')
