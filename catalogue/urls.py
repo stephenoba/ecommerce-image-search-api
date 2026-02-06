@@ -7,9 +7,11 @@ from catalogue.api_views.product_views import (
     ProductDetailAPIView
 )
 from catalogue.api_views.cart_views import CartActiveAPIView, CartItemViewSet, CartClearAPIView
+from catalogue.api_views.order_views import OrderViewSet, OrderItemListAPIView
 
 router = DefaultRouter()
 router.register(r'cart/items', CartItemViewSet, basename='cart-item')
+router.register(r'orders', OrderViewSet, basename='order')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -21,4 +23,5 @@ urlpatterns = [
     path('products/category/<slug:slug>/', ProductByCategoryListAPIView.as_view(), name='product-by-category'),
     path('cart/active/', CartActiveAPIView.as_view(), name='cart-active'),
     path('cart/clear/', CartClearAPIView.as_view(), name='cart-clear'),
+    path('orders/<int:id>/items/', OrderItemListAPIView.as_view(), name='order-items'),
 ]

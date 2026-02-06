@@ -82,7 +82,7 @@ class Cart(models.Model):
         created_at (DateTimeField): The date and time the cart was created
         updated_at (DateTimeField): The date and time the cart was updated
     """
-    user = models.ForeignKey('users.User', on_delete=models.CASCADE)
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='carts')
     status = models.CharField(
         max_length=255, 
         choices=[('active', 'Active'), ('frozen', 'Frozen'), ('abandoned', 'Abandoned')], 

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from catalogue.models import Category
-from catalogue.models import Product, ProductEmbedding, Cart, CartItem
+from catalogue.models import Product, ProductEmbedding, Cart, CartItem, Order, OrderItem
 from users.models import User
 
 # Mock psycopg2 and ArrayField to avoid import errors with SQLite/Broken Env
@@ -728,3 +728,100 @@ class CartAPITest(TestCase):
         response = self.client.delete(self.clear_url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(CartItem.objects.filter(cart=cart).count(), 0)
+
+
+class OrderAPITest(TestCase):
+    """Tests for the order and checkout API endpoints"""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='user1', password='password123', email='user1@test.com')
+        self.admin = User.objects.create_superuser(username='admin', password='password123', email='admin@test.com')
+        self.category = Category.objects.create(name='Electronics', slug='electronics', description='Desc')
+        self.product = Product.objects.create(
+            name='Laptop', sku='LP-01', description='Desc', 
+            price=1000.00, stock_quantity=5, category=self.category
+        )
+        self.cart = Cart.objects.create(user=self.user, status='active')
+        self.cart_item = CartItem.objects.create(cart=self.cart, product=self.product, quantity=1)
+        
+        self.order_url = reverse('order-list')
+        self.admin_url = reverse('order-list')
+
+    def test_checkout_creates_order(self):
+        """POST /orders/ should create an order from active cart"""
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(self.order_url, {})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Order.objects.count(), 1)
+        
+        # Verify cart is frozen
+        self.cart.refresh_from_db()
+        self.assertEqual(self.cart.status, 'frozen')
+        
+        # Verify order items
+        order = Order.objects.first()
+        self.assertEqual(order.orderitem_set.count(), 1)
+        self.assertEqual(order.orderitem_set.first().product, self.product)
+        self.assertEqual(float(order.total), 1100.00) # 1000 + 10% tax
+
+    def test_list_user_orders(self):
+        self.client.force_authenticate(user=self.user)
+        # Create an order
+        self.client.post(self.order_url, {})
+        
+        response = self.client.get(self.order_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+    def test_get_order_details(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.post(self.order_url, {})
+        order_id = resp.data['id']
+        
+        url = reverse('order-detail', kwargs={'pk': order_id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['id'], order_id)
+        self.assertEqual(len(response.data['items']), 1)
+
+    def test_admin_update_order_status(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.post(self.order_url, {})
+        order_id = resp.data['id']
+        
+        url = reverse('order-detail', kwargs={'pk': order_id})
+        
+        # Regular user fails
+        data = {'status': 'completed'}
+        response = self.client.patch(url, data)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        
+        # Admin user succeeds
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(url, data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        order = Order.objects.get(id=order_id)
+        self.assertEqual(order.status, 'completed')
+
+    def test_cancel_order(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.post(self.order_url, {})
+        order_id = resp.data['id']
+        
+        url = reverse('order-cancel', kwargs={'pk': order_id})
+        response = self.client.put(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        order = Order.objects.get(id=order_id)
+        self.assertEqual(order.status, 'cancelled')
+
+    def test_get_order_items(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.post(self.order_url, {})
+        order_id = resp.data['id']
+        
+        url = reverse('order-items', kwargs={'id': order_id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['product'], self.product.id)

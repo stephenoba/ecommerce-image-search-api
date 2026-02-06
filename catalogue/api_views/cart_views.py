@@ -33,11 +33,12 @@ class CartItemViewSet(viewsets.ModelViewSet):
         quantity = serializer.validated_data.get('quantity', 1)
         
         # Check if item already exists in cart
-        cart_item, created = CartItem.objects.get_or_create(cart=cart, product=product)
-        if not created:
+        cart_item = CartItem.objects.filter(cart=cart, product=product).first()
+        if cart_item:
             cart_item.quantity += quantity
             cart_item.save()
-            # We don't call serializer.save() here because we handled it
+            # Manually set the instance so the serializer returns the updated item
+            serializer.instance = cart_item
         else:
             serializer.save(cart=cart)
 
