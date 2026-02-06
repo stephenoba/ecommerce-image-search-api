@@ -8,7 +8,7 @@ from catalogue.models import Product
 from catalogue.serializers.product_serializers import ProductSerializer, ProductCreateSerializer
 from catalogue.serializers.search_serializers import ImageSearchSerializer, ProductSearchResultSerializer
 from catalogue.tasks import generate_embedding, generate_image_embedding, search_similar_products
-from catalogue.permissions import IsAdminUser
+from catalogue.permissions import IsAdminUser, IsAdminOrReadOnly
 import tempfile
 import os
 
@@ -68,6 +68,18 @@ class ProductCreateAPIView(generics.CreateAPIView):
         product = serializer.save()
         # Trigger async task to generate embedding
         generate_embedding.delay(product.id)
+
+
+class ProductDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    API View for retrieving, updating, or deleting a product.
+    GET: AllowAny
+    PUT/PATCH/DELETE: IsAdminUser
+    """
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    lookup_field = 'id'
 
 
 class ProductImageSearchAPIView(APIView):

@@ -95,10 +95,12 @@ class Cart(models.Model):
 
     def save(self, *args, **kwargs):
         # User's can't have more than three carts, and not more than one active cart
-        if self.user.carts.count() >= 3:
-            raise ValueError("User can't have more than three carts")
-        if self.user.carts.filter(status='active').count() >= 1:
-            raise ValueError("User can't have more than one active cart")
+        if self.pk is None: # Only check on creation
+            if self.user.carts.count() >= 3:
+                raise ValueError("User can't have more than three carts")
+            # TODO: Need to check for carts that are updated to active to ensure only one active cart
+            if self.user.carts.filter(status='active').count() >= 1:
+                raise ValueError("User can't have more than one active cart")
         super().save(*args, **kwargs)
 
 

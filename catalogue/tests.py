@@ -7,7 +7,8 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from catalogue.models import Category
-from catalogue.models import Product
+from catalogue.models import Product, ProductEmbedding, Cart, CartItem
+from users.models import User
 
 # Mock psycopg2 and ArrayField to avoid import errors with SQLite/Broken Env
 sys.modules['psycopg2'] = MagicMock()
@@ -589,3 +590,141 @@ class ProductImageSearchAPITest(TestCase):
         mock_search.assert_called_once()
         call_args = mock_search.call_args
         self.assertEqual(call_args[1]['k'], 3)
+
+
+class ProductDetailAPITest(TestCase):
+    """Tests for the product detail API endpoint"""
+    
+    def setUp(self):
+        self.client = APIClient()
+        self.category = Category.objects.create(name='Electronics', slug='electronics', description='Desc')
+        self.product = Product.objects.create(
+            name='Test Product', sku='SKU-001', description='Desc', 
+            price=10.00, stock_quantity=10, category=self.category
+        )
+        self.admin_user = User.objects.create_superuser(username='admin', password='password', email='admin@test.com')
+        self.regular_user = User.objects.create_user(username='user', password='password', email='user@test.com')
+        self.url = reverse('product-detail', kwargs={'id': self.product.id})
+
+    def test_get_product_detail_allow_any(self):
+        """Anyone can view product details"""
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['name'], self.product.name)
+
+    def test_update_product_as_admin(self):
+        """Admin can update product"""
+        self.client.force_authenticate(user=self.admin_user)
+        data = {'name': 'Updated Name'}
+        response = self.client.patch(self.url, data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.name, 'Updated Name')
+
+    def test_update_product_as_regular_user(self):
+        """Regular user cannot update product"""
+        self.client.force_authenticate(user=self.regular_user)
+        data = {'name': 'Updated Name'}
+        response = self.client.patch(self.url, data)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_delete_product_as_admin(self):
+        """Admin can delete product"""
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.delete(self.url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Product.objects.filter(id=self.product.id).exists())
+
+
+class CartAPITest(TestCase):
+    """Tests for the cart and cart item API endpoints"""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='user1', password='password123', email='user1@test.com')
+        self.user2 = User.objects.create_user(username='user2', password='password123', email='user2@test.com')
+        self.category = Category.objects.create(name='Electronics', slug='electronics', description='Desc')
+        self.product = Product.objects.create(
+            name='Laptop', sku='LP-01', description='Desc', 
+            price=1000.00, stock_quantity=5, category=self.category
+        )
+        self.item_url = reverse('cart-item-list')
+        self.active_url = reverse('cart-active')
+        self.clear_url = reverse('cart-clear')
+
+    def test_add_item_to_cart(self):
+        self.client.force_authenticate(user=self.user)
+        data = {'product': self.product.id, 'quantity': 2}
+        response = self.client.post(self.item_url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(CartItem.objects.count(), 1)
+        self.assertEqual(CartItem.objects.first().quantity, 2)
+
+    def test_add_same_item_updates_quantity(self):
+        self.client.force_authenticate(user=self.user)
+        CartItem.objects.create(
+            cart=Cart.objects.create(user=self.user, status='active'),
+            product=self.product,
+            quantity=1
+        )
+        data = {'product': self.product.id, 'quantity': 2}
+        response = self.client.post(self.item_url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(CartItem.objects.get().quantity, 3)
+
+    def test_get_active_cart(self):
+        self.client.force_authenticate(user=self.user)
+        data = {'product': self.product.id, 'quantity': 1}
+        self.client.post(self.item_url, data)
+        
+        response = self.client.get(self.active_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['items']), 1)
+        self.assertEqual(float(response.data['total_price']), 1000.00)
+
+    def test_cart_isolation(self):
+        """User A cannot see User B's cart"""
+        # User 1 has item
+        cart1 = Cart.objects.create(user=self.user, status='active')
+        CartItem.objects.create(cart=cart1, product=self.product, quantity=1)
+        
+        # User 2 logs in
+        self.client.force_authenticate(user=self.user2)
+        response = self.client.get(self.active_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Cart for User 2 should be empty (or just created)
+        self.assertEqual(len(response.data['items']), 0)
+
+    def test_update_cart_item(self):
+        self.client.force_authenticate(user=self.user)
+        item = CartItem.objects.create(
+            cart=Cart.objects.create(user=self.user, status='active'),
+            product=self.product,
+            quantity=1
+        )
+        url = reverse('cart-item-detail', kwargs={'pk': item.id})
+        response = self.client.patch(url, {'quantity': 5})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item.refresh_from_db()
+        self.assertEqual(item.quantity, 5)
+
+    def test_delete_cart_item(self):
+        self.client.force_authenticate(user=self.user)
+        item = CartItem.objects.create(
+            cart=Cart.objects.create(user=self.user, status='active'),
+            product=self.product,
+            quantity=1
+        )
+        url = reverse('cart-item-detail', kwargs={'pk': item.id})
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(CartItem.objects.count(), 0)
+
+    def test_clear_cart(self):
+        self.client.force_authenticate(user=self.user)
+        cart = Cart.objects.create(user=self.user, status='active')
+        CartItem.objects.create(cart=cart, product=self.product, quantity=1)
+        
+        response = self.client.delete(self.clear_url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(CartItem.objects.filter(cart=cart).count(), 0)
