@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
+from drf_yasg.utils import swagger_auto_schema
 from catalogue.models import Product
 from catalogue.serializers.product_serializers import ProductSerializer, ProductCreateSerializer
 from catalogue.serializers.search_serializers import ImageSearchSerializer, ProductSearchResultSerializer
@@ -76,6 +77,7 @@ class ProductImageSearchAPIView(APIView):
     """
     permission_classes = [AllowAny]
     
+    @swagger_auto_schema(request_body=ImageSearchSerializer)
     def post(self, request, *args, **kwargs):
         serializer = ImageSearchSerializer(data=request.data)
         
@@ -122,7 +124,7 @@ class ProductImageSearchAPIView(APIView):
             
             # Sort by similarity score descending
             results.sort(key=lambda x: x.similarity_score, reverse=True)
-            
+
             result_serializer = ProductSearchResultSerializer(results, many=True)
             
             return Response({
