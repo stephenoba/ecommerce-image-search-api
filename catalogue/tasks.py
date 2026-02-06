@@ -51,6 +51,68 @@ def update_faiss_index(embedding, product_id):
     index.add_with_ids(embedding_np, ids_np)
     faiss.write_index(index, INDEX_FILE)
 
+def generate_image_embedding(image_path):
+    """
+    Generate embedding for an image file.
+    
+    Args:
+        image_path: Path to the image file
+        
+    Returns:
+        numpy array: 2048-dimensional embedding vector
+    """
+    model = get_model()
+    preprocess = get_transform()
+    
+    # Load and preprocess image
+    image = Image.open(image_path).convert('RGB')
+    input_tensor = preprocess(image)
+    input_batch = input_tensor.unsqueeze(0)
+    
+    # Generate embedding
+    with torch.no_grad():
+        output = model(input_batch)
+    
+    # Flatten and return as numpy array
+    embedding = output.squeeze().numpy()
+    return embedding
+
+def search_similar_products(query_embedding, k=10):
+    """
+    Search for similar products using FAISS.
+    
+    Args:
+        query_embedding: numpy array of the query image embedding
+        k: number of similar products to return
+        
+    Returns:
+        list of tuples: [(product_id, distance), ...]
+    """
+    if not os.path.exists(INDEX_FILE):
+        logger.warning("FAISS index file not found. No products to search.")
+        return []
+    
+    try:
+        index = faiss.read_index(INDEX_FILE)
+        
+        # Ensure query is 2D array of float32
+        query_np = np.array([query_embedding], dtype='float32')
+        
+        # Search for k nearest neighbors
+        # distances are L2 distances (lower is more similar)
+        distances, indices = index.search(query_np, k)
+        
+        # indices[0] contains the product IDs, distances[0] contains the distances
+        results = []
+        for idx, distance in zip(indices[0], distances[0]):
+            if idx != -1:  # -1 indicates no result found
+                results.append((int(idx), float(distance)))
+        
+        return results
+    except Exception as e:
+        logger.error(f"Error searching FAISS index: {e}")
+        return []
+
 @shared_task
 def generate_embedding(product_id):
     try:
@@ -59,31 +121,18 @@ def generate_embedding(product_id):
             logger.warning(f"Product {product_id} has no image.")
             return
 
-        # Prepare model and transform
-        model = get_model()
-        preprocess = get_transform()
-
-        # Load and preprocess image
+        # Generate embedding using helper function
         image_path = product.image.path
-        image = Image.open(image_path).convert('RGB')
-        input_tensor = preprocess(image)
-        input_batch = input_tensor.unsqueeze(0)  # Create a mini-batch as expected by the model
-
-        # Generate embedding
-        with torch.no_grad():
-            output = model(input_batch)
-        
-        # Flatten the output 
-        embedding = output.squeeze().numpy().tolist()
+        embedding = generate_image_embedding(image_path)
 
         # Save to database
         ProductEmbedding.objects.update_or_create(
             product=product,
-            defaults={'embedding_vector': embedding}
+            defaults={'embedding_vector': embedding.tolist()}
         )
 
         # Update FAISS index
-        update_faiss_index(embedding, product.id)
+        update_faiss_index(embedding.tolist(), product.id)
         
         logger.info(f"Successfully generated embedding for product {product_id}")
 

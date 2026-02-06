@@ -1,10 +1,15 @@
-from rest_framework import generics
+from rest_framework import generics, status
+from rest_framework.views import APIView
+from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from catalogue.models import Product
 from catalogue.serializers.product_serializers import ProductSerializer, ProductCreateSerializer
-from catalogue.tasks import generate_embedding
+from catalogue.serializers.search_serializers import ImageSearchSerializer, ProductSearchResultSerializer
+from catalogue.tasks import generate_embedding, generate_image_embedding, search_similar_products
 from catalogue.permissions import IsAdminUser
+import tempfile
+import os
 
 class ProductPagination(PageNumberPagination):
     page_size = 10
@@ -62,3 +67,75 @@ class ProductCreateAPIView(generics.CreateAPIView):
         product = serializer.save()
         # Trigger async task to generate embedding
         generate_embedding.delay(product.id)
+
+
+class ProductImageSearchAPIView(APIView):
+    """
+    API View for searching products by image similarity.
+    Accepts an uploaded image and returns similar products.
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request, *args, **kwargs):
+        serializer = ImageSearchSerializer(data=request.data)
+        
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        uploaded_image = serializer.validated_data['image']
+        limit = serializer.validated_data.get('limit', 10)
+        
+        # Save uploaded image to temporary file
+        temp_file = None
+        try:
+            # Create temporary file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
+            for chunk in uploaded_image.chunks():
+                temp_file.write(chunk)
+            temp_file.close()
+            
+            # Generate embedding for the uploaded image
+            query_embedding = generate_image_embedding(temp_file.name)
+            
+            # Search for similar products
+            search_results = search_similar_products(query_embedding, k=limit)
+            
+            if not search_results:
+                return Response({
+                    'results': [],
+                    'message': 'No similar products found.'
+                }, status=status.HTTP_200_OK)
+            
+            # Fetch products and attach similarity scores
+            product_ids = [pid for pid, _ in search_results]
+            products = Product.objects.filter(id__in=product_ids)
+            
+            # Create a mapping of product_id to distance
+            distance_map = {pid: distance for pid, distance in search_results}
+            
+            # Attach similarity scores and sort by distance
+            results = []
+            for product in products:
+                distance = distance_map.get(product.id, float('inf'))
+                product.similarity_score = 1.0 / (1.0 + distance)
+                results.append(product)
+            
+            # Sort by similarity score descending
+            results.sort(key=lambda x: x.similarity_score, reverse=True)
+            
+            result_serializer = ProductSearchResultSerializer(results, many=True)
+            
+            return Response({
+                'results': result_serializer.data,
+                'count': len(results)
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({
+                'error': f'Error processing image search: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        finally:
+            # Clean up temporary file
+            if temp_file and os.path.exists(temp_file.name):
+                os.unlink(temp_file.name)

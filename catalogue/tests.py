@@ -4,6 +4,7 @@ from rest_framework.test import APIClient
 from rest_framework import status
 import sys
 from unittest.mock import MagicMock
+import numpy as np
 
 from catalogue.models import Category
 from catalogue.models import Product
@@ -336,10 +337,9 @@ class ProductEmbeddingTaskTest(TestCase):
         
         embedding = ProductEmbedding.objects.get(product=product)
         
-        # Verify embedding vector has correct length (ResNet50 outputs 2048-dim)
+        # Verify embedding vector has correct length (2048)
         self.assertEqual(len(embedding.embedding_vector), 2048)
         
-        # Verify all values are floats
         self.assertTrue(all(isinstance(x, float) for x in embedding.embedding_vector))
     
     @patch('catalogue.tasks.faiss')
@@ -437,3 +437,155 @@ class ProductEmbeddingTaskTest(TestCase):
         
         # Verify error was logged
         mock_logger.error.assert_called_once()
+
+
+class ProductImageSearchAPITest(TestCase):
+    """Tests for the image search API endpoint"""
+    
+    def setUp(self):
+        self.client = APIClient()
+        self.category = Category.objects.create(
+            name='Electronics',
+            slug='electronics',
+            description='Electronic items'
+        )
+        
+    def create_test_image(self):
+        """Create a simple test image as UploadedFile"""
+        image = Image.new('RGB', (224, 224), color='red')
+        image_file = io.BytesIO()
+        image.save(image_file, 'JPEG')
+        image_file.seek(0)
+        return SimpleUploadedFile(
+            name='search_test.jpg',
+            content=image_file.read(),
+            content_type='image/jpeg'
+        )
+    
+    @patch('catalogue.api_views.product_views.search_similar_products')
+    @patch('catalogue.api_views.product_views.generate_image_embedding')
+    def test_image_search_with_results(self, mock_generate_embedding, mock_search):
+        """Test successful image search with results"""
+        # Create test products
+        product1 = Product.objects.create(
+            name='Product 1',
+            sku='SKU-001',
+            description='Test product 1',
+            price=29.99,
+            stock_quantity=100,
+            category=self.category
+        )
+        product2 = Product.objects.create(
+            name='Product 2',
+            sku='SKU-002',
+            description='Test product 2',
+            price=39.99,
+            stock_quantity=50,
+            category=self.category
+        )
+        
+        # Mock embedding generation and search
+        mock_generate_embedding.return_value = np.zeros(2048)
+        mock_search.return_value = [
+            (product1.id, 0.5),  # Lower distance = more similar
+            (product2.id, 1.2)
+        ]
+        
+        url = reverse('product-search-upload')
+        data = {'image': self.create_test_image()}
+        
+        response = self.client.post(url, data, format='multipart')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('results', response.data)
+        self.assertIn('count', response.data)
+        self.assertEqual(response.data['count'], 2)
+        
+        # Verify results are ordered by similarity score (descending)
+        results = response.data['results']
+        self.assertEqual(len(results), 2)
+        
+        # First result should be product1 (lower distance = higher similarity)
+        self.assertEqual(results[0]['id'], product1.id)
+        self.assertIn('similarity_score', results[0])
+        
+        # Similarity scores should be in descending order
+        self.assertGreater(results[0]['similarity_score'], results[1]['similarity_score'])
+    
+    @patch('catalogue.api_views.product_views.search_similar_products')
+    @patch('catalogue.api_views.product_views.generate_image_embedding')
+    def test_image_search_no_results(self, mock_generate_embedding, mock_search):
+        """Test image search when no similar products found"""
+        mock_generate_embedding.return_value = np.zeros(2048)
+        mock_search.return_value = []
+        
+        url = reverse('product-search-upload')
+        data = {'image': self.create_test_image()}
+        
+        response = self.client.post(url, data, format='multipart')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['results'], [])
+        self.assertIn('message', response.data)
+    
+    def test_image_search_missing_image(self):
+        """Test image search without uploading an image"""
+        url = reverse('product-search-upload')
+        data = {}
+        
+        response = self.client.post(url, data, format='multipart')
+        
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('image', response.data)
+    
+    def test_image_search_invalid_image(self):
+        """Test image search with invalid image file"""
+        url = reverse('product-search-upload')
+        
+        # Create invalid file (text instead of image)
+        invalid_file = SimpleUploadedFile(
+            name='test.txt',
+            content=b'This is not an image',
+            content_type='text/plain'
+        )
+        
+        data = {'image': invalid_file}
+        response = self.client.post(url, data, format='multipart')
+        
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+    
+    @patch('catalogue.api_views.product_views.search_similar_products')
+    @patch('catalogue.api_views.product_views.generate_image_embedding')
+    def test_image_search_with_limit_parameter(self, mock_generate_embedding, mock_search):
+        """Test image search with custom limit parameter"""
+        # Create 5 products
+        products = []
+        for i in range(5):
+            product = Product.objects.create(
+                name=f'Product {i}',
+                sku=f'SKU-{i}',
+                description=f'Test product {i}',
+                price=29.99 + i,
+                stock_quantity=100,
+                category=self.category
+            )
+            products.append(product)
+        
+        mock_generate_embedding.return_value = np.zeros(2048)
+        # Return all 5 products with different distances
+        mock_search.return_value = [(p.id, float(i)) for i, p in enumerate(products)]
+        
+        url = reverse('product-search-upload')
+        data = {
+            'image': self.create_test_image(),
+            'limit': 3  # Request only top 3
+        }
+        
+        response = self.client.post(url, data, format='multipart')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify search was called with limit=3
+        mock_search.assert_called_once()
+        call_args = mock_search.call_args
+        self.assertEqual(call_args[1]['k'], 3)
