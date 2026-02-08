@@ -27,7 +27,7 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-2zp=ko)_=um*$1k7zxxwm
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'web']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'web', 'api-z6po.onrender.com']
 
 
 # Application definition
