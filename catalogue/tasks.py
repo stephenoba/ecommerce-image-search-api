@@ -17,14 +17,22 @@ logger = logging.getLogger(__name__)
 INDEX_FILE = getattr(settings, 'FAISS_INDEX_PATH', os.path.join(settings.BASE_DIR, 'faiss_index.bin'))
 EMBEDDING_DIM = 2048
 
+# Global cache to prevent redundant loading
+_MODEL = None
+_FAISS_INDEX = None
+
 def get_model():
+    global _MODEL
+    if _MODEL is not None:
+        return _MODEL
+        
     # Load pre-trained ResNet50 model
     model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     # Remove the last fully connected layer to get embeddings
     modules = list(model.children())[:-1]
-    model = torch.nn.Sequential(*modules)
-    model.eval()
-    return model
+    _MODEL = torch.nn.Sequential(*modules)
+    _MODEL.eval()
+    return _MODEL
 
 def get_transform():
     return transforms.Compose([
@@ -36,20 +44,22 @@ def get_transform():
 
 def update_faiss_index(embedding, product_id):
     # This is a naive implementation. In production, consider using a dedicated vector DB or handling concurrency limits.
-    index = None
-    if os.path.exists(INDEX_FILE):
-        index = faiss.read_index(INDEX_FILE)
-    else:
-        index = faiss.IndexFlatL2(EMBEDDING_DIM)
-        # Using ID map to store product IDs
-        index = faiss.IndexIDMap(index)
+    global _FAISS_INDEX
+    
+    if _FAISS_INDEX is None:
+        if os.path.exists(INDEX_FILE):
+            _FAISS_INDEX = faiss.read_index(INDEX_FILE)
+        else:
+            base_index = faiss.IndexFlatL2(EMBEDDING_DIM)
+            # Using ID map to store product IDs
+            _FAISS_INDEX = faiss.IndexIDMap(base_index)
 
     # Faiss expects numpy array of float32
     embedding_np = np.array([embedding], dtype='float32')
     ids_np = np.array([product_id], dtype='int64')
 
-    index.add_with_ids(embedding_np, ids_np)
-    faiss.write_index(index, INDEX_FILE)
+    _FAISS_INDEX.add_with_ids(embedding_np, ids_np)
+    faiss.write_index(_FAISS_INDEX, INDEX_FILE)
 
 def generate_image_embedding(image_path):
     """
@@ -88,19 +98,22 @@ def search_similar_products(query_embedding, k=10):
     Returns:
         list of tuples: [(product_id, distance), ...]
     """
-    if not os.path.exists(INDEX_FILE):
-        logger.warning("FAISS index file not found. No products to search.")
+    global _FAISS_INDEX
+    
+    if not os.path.exists(INDEX_FILE) and _FAISS_INDEX is None:
+        logger.warning("FAISS index file not found and index not in memory. No products to search.")
         return []
     
     try:
-        index = faiss.read_index(INDEX_FILE)
+        if _FAISS_INDEX is None:
+            _FAISS_INDEX = faiss.read_index(INDEX_FILE)
         
         # Ensure query is 2D array of float32
         query_np = np.array([query_embedding], dtype='float32')
         
         # Search for k nearest neighbors
         # distances are L2 distances (lower is more similar)
-        distances, indices = index.search(query_np, k)
+        distances, indices = _FAISS_INDEX.search(query_np, k)
         
         # indices[0] contains the product IDs, distances[0] contains the distances
         results = []
