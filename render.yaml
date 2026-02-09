@@ -30,6 +30,11 @@ services:
         fromDatabase:
           name: apidb
           property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: celery-redis
+          type: redis
+          property: connectionString
       - key: SECRET_KEY
         generateValue: true
       - key: WEB_CONCURRENCY
